@@ -1,0 +1,18 @@
+services:
+  cisco-monitor:
+    build: .
+    image: cisco-monitor:latest
+    container_name: cisco-monitor
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - cisco-monitor-data:/data
+      # Bei SSH-Key-Login: eigenen privaten Key read-only reinmounten und
+      # den Pfad im Einstellungen-Tab als /keys/id_rsa eintragen.
+      # - /pfad/zu/deinem/id_rsa:/keys/id_rsa:ro
+    environment:
+      - CONFIG_DIR=/data
+
+volumes:
+  cisco-monitor-data:
