@@ -5,7 +5,7 @@ services:
     container_name: cisco-monitor
     restart: unless-stopped
     ports:
-      - "8188:8000"
+      - "8189:8000"
     volumes:
       - cisco-monitor-data:/data
       # Bei SSH-Key-Login: eigenen privaten Key read-only reinmounten und
