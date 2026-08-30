@@ -18,4 +18,4 @@ RUN mkdir -p /data
 # support burden than it's worth for a single-user internal tool.
 EXPOSE 8000
 
-CMD ["python", "app.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "1", "--threads", "4", "app:app"]
