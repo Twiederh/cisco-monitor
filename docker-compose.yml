@@ -3,6 +3,7 @@ services:
     build: .
     image: cisco-monitor:latest
     container_name: cisco-monitor
+    pull_policy: build
     restart: unless-stopped
     ports:
       - "8189:8000"
