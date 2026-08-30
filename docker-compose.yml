@@ -1,8 +1,8 @@
 services:
-  cisco-monitor:
+  sipmonitor:
     build: .
     image: cisco-monitor:latest
-    container_name: cisco-monitor
+    container_name: sipmonitor
     pull_policy: build
     restart: unless-stopped
     ports:
