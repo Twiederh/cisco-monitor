@@ -27,5 +27,6 @@ services:
 
 volumes:
   cisco-monitor-data:
-proxy:
+networks:
+ proxy:
   external: true
