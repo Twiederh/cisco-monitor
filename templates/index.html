@@ -36,6 +36,14 @@
         <p class="hint">Neue Zeilen aus <code>show logging</code> seit Verbindungsaufbau, rot = Fehler/Warnung (Syslog-Schweregrad 0–4).</p>
         <div id="router-log"></div>
       </section>
+
+      <section class="card" id="incidents-card" hidden>
+        <h2>Gespeicherte Störungsfälle</h2>
+        <p class="hint">Sobald eine Line auf "no" springt oder verschwindet, wird automatisch ein vollständiges
+          <code>show logging</code> vom Router gespeichert (im <code>/data</code>-Volume, übersteht also auch einen
+          Container-Neustart) - zum späteren Nachschauen, was zu dem Zeitpunkt auf dem Router los war.</p>
+        <div id="incidents"></div>
+      </section>
     </div>
 
     <div id="tab-debug" class="tab-panel" hidden>

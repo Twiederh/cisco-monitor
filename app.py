@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 
 import config_store
 from poller import DEFAULT_COMMAND, monitor
@@ -85,6 +85,23 @@ def api_labels():
     monitor.set_label(line, title)
     persist()
     return jsonify(labels=monitor.labels)
+
+
+@app.get("/api/incidents")
+def api_incidents():
+    """Störungsfälle: a 'show logging' auto-captured each time a SIP-UA
+    registration anomaly first appeared, so they survive past the rolling
+    in-memory log window and past restarts. See poller.py's
+    Monitor._capture_incident."""
+    return jsonify(incidents=config_store.list_incidents_meta())
+
+
+@app.get("/api/incidents/<path:filename>")
+def api_incident_download(filename):
+    path = config_store.incident_path(filename)
+    if not path:
+        return jsonify(error="Nicht gefunden."), 404
+    return send_file(path, mimetype="text/plain", as_attachment=True, download_name=filename)
 
 
 @app.post("/api/debug/start")

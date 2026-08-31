@@ -6,6 +6,12 @@ Web-GUI, die sich per SSH mit einem Cisco-Router/CUBE verbindet und periodisch
 `undebug all`) und einen `/healthz`-Endpunkt für externes Monitoring
 (z. B. Uptime Kuma).
 
+Sobald eine Line auf "no" springt oder ganz aus der Ausgabe verschwindet,
+wird automatisch ein vollständiges `show logging` vom Router erfasst und
+unter `/data/incidents/<Zeitstempel>.log` gespeichert ("Gespeicherte
+Störungsfälle" im Status-Tab) - übersteht also auch einen Neustart des
+Containers und die rollierende Anzeige im Tab "Router-Logmeldungen".
+
 ## Lokal mit Docker Compose
 
 ```bash

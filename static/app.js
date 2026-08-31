@@ -8,6 +8,8 @@ const historyEl = document.getElementById("history");
 const historyCard = document.getElementById("history-card");
 const routerLogCard = document.getElementById("router-log-card");
 const routerLogEl = document.getElementById("router-log");
+const incidentsCard = document.getElementById("incidents-card");
+const incidentsEl = document.getElementById("incidents");
 const tabButtons = document.querySelectorAll(".tab-btn");
 const tabPanels = document.querySelectorAll(".tab-panel");
 const debugStartBtn = document.getElementById("debug-start-btn");
@@ -194,6 +196,42 @@ disconnectBtn.addEventListener("click", async () => {
   const data = await res.json();
   renderStatus(data);
 });
+
+// --- Störungsfälle -------------------------------------------------------
+
+function renderIncidents(items) {
+  if (!items.length) {
+    incidentsCard.hidden = true;
+    incidentsEl.innerHTML = "";
+    return;
+  }
+  incidentsCard.hidden = false;
+  incidentsEl.innerHTML = items
+    .map((it) => {
+      const stamp = it.filename.replace(/\.log$/, "").replace("_", " ");
+      const kb = ((it.size || 0) / 1024).toFixed(1);
+      return `<div class="history-entry">
+        <div><strong>${escapeHtml(stamp)}</strong> — ${escapeHtml(it.reason || "?")} <span class="muted">(${kb} KB)</span></div>
+        <div class="row actions">
+          <a href="/api/incidents/${encodeURIComponent(it.filename)}">Log herunterladen</a>
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+async function refreshIncidents() {
+  try {
+    const res = await fetch("/api/incidents");
+    const data = await res.json();
+    renderIncidents(data.incidents || []);
+  } catch (e) {
+    // transient network hiccup, ignore
+  }
+}
+
+refreshIncidents();
+setInterval(refreshIncidents, POLL_UI_INTERVAL_MS);
 
 // --- SIP-Debug ---------------------------------------------------------
 

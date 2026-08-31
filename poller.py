@@ -1,9 +1,11 @@
+import os
 import re
 import threading
 import time
 from collections import deque
 from datetime import datetime
 
+import config_store
 from parsers import parse_sip_ua_register_status
 from ssh_client import CiscoSSHError, CiscoSSHSession
 
@@ -37,6 +39,11 @@ class Monitor:
         self.secrets = {}  # password / key_passphrase / enable_password - never in snapshot()
         self.labels = {}  # sip-ua "line" identifier -> user-chosen display title
 
+        # tracks whether the *previous* poll already had an anomaly, so a
+        # 'show logging' capture only fires on the transition into trouble
+        # (see _capture_incident) rather than once per poll while it lasts
+        self._incident_active = False
+
         # dedicated second session for 'debug ...' capture, see start_debug()
         self._debug_lock = threading.Lock()
         self._debug_session = None
@@ -67,6 +74,7 @@ class Monitor:
         self.status = "connecting"
         self.error = None
         self._last_log_raw = ""  # fresh baseline; avoids re-showing old log history as "new"
+        self._incident_active = False
         self._thread = threading.Thread(
             target=self._run,
             args=(host, username, password, port, key_filename,
@@ -131,6 +139,14 @@ class Monitor:
             self.error = str(exc)
             self.status = "error"
         self.history.appendleft(entry)
+
+        problems = self._current_problems()
+        if problems:
+            if not self._incident_active:
+                self._capture_incident(problems)
+            self._incident_active = True
+        else:
+            self._incident_active = False
 
     def _poll_log(self):
         """Fetch 'show logging' and record only lines that are new since
@@ -260,11 +276,69 @@ class Monitor:
                 "bytes_captured": sum(len(c) for c in self._debug_buffer),
             }
 
+    def _current_problems(self):
+        """Anomaly strings for the latest poll - a line reporting reg !=
+        yes, or a line that was present in the previous poll but has
+        disappeared since. None (as opposed to []) means there isn't a
+        valid parsed snapshot to judge at all (no history yet, the poll
+        itself failed, or the output didn't parse), which callers should
+        treat as "can't tell" rather than "no problems"."""
+        if not self.history:
+            return None
+        latest = self.history[0]
+        if not latest.get("ok"):
+            return None
+        parsed = latest.get("parsed")
+        if not isinstance(parsed, list):
+            return None
+
+        problems = []
+        for row in parsed:
+            if (row.get("reg") or "").lower() != "yes":
+                problems.append(f"{self._label_for(row.get('line'))}: reg={row.get('reg')}")
+
+        if len(self.history) > 1 and isinstance(self.history[1].get("parsed"), list):
+            current_lines = {row.get("line") for row in parsed}
+            for row in self.history[1]["parsed"]:
+                if row.get("line") not in current_lines:
+                    problems.append(f"{self._label_for(row.get('line'))}: nicht mehr in der Ausgabe")
+        return problems
+
+    def _capture_incident(self, problems):
+        """Save a full 'show logging' to CONFIG_DIR/incidents the moment a
+        SIP-UA registration anomaly first appears, so it survives past the
+        rolling in-memory log window (see log_entries/_poll_log) and past
+        container restarts - for looking up later what the router logged
+        right when a trunk dropped. Runs one extra 'show logging' round
+        trip on top of the one _poll_log already does this cycle; kept
+        separate/simple rather than reusing that one, since this only
+        happens on the rare transition into trouble."""
+        with self._lock:
+            session = self._session
+        if session is None:
+            return
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        try:
+            with self._lock:
+                raw_log = session.run_command(LOG_COMMAND)
+        except CiscoSSHError as exc:
+            raw_log = f"(show logging fehlgeschlagen: {exc})"
+
+        try:
+            os.makedirs(config_store.INCIDENTS_DIR, exist_ok=True)
+            path = os.path.join(config_store.INCIDENTS_DIR, f"{timestamp}.log")
+            header = f"Zeitpunkt: {timestamp}\nGrund: {'; '.join(problems)}\n{'-' * 60}\n\n"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(header)
+                f.write(raw_log)
+        except OSError:
+            pass  # best-effort - a failed capture shouldn't break polling
+
     def health(self):
         """Boiled-down up/down verdict for external monitoring (e.g.
         Uptime Kuma via a plain HTTP status check): same anomaly rule as
-        the GUI's "Verlauf" trigger - a line reporting reg != yes, or a
-        line that was present in the previous poll but has disappeared."""
+        the GUI's "Verlauf" trigger, see _current_problems()."""
         if self.status != "running":
             return {"healthy": False, "reason": f"Monitor-Status: {self.status}", "tenants": []}
         if not self.history:
@@ -278,17 +352,7 @@ class Monitor:
         if not isinstance(parsed, list):
             return {"healthy": False, "reason": "Ausgabe konnte nicht geparst werden", "tenants": []}
 
-        problems = []
-        for row in parsed:
-            if (row.get("reg") or "").lower() != "yes":
-                problems.append(f"{self._label_for(row.get('line'))}: reg={row.get('reg')}")
-
-        if len(self.history) > 1 and isinstance(self.history[1].get("parsed"), list):
-            current_lines = {row.get("line") for row in parsed}
-            for row in self.history[1]["parsed"]:
-                if row.get("line") not in current_lines:
-                    problems.append(f"{self._label_for(row.get('line'))}: nicht mehr in der Ausgabe")
-
+        problems = self._current_problems() or []
         tenants = [
             {
                 "line": row.get("line"),
