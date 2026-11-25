@@ -96,26 +96,55 @@ class Monitor:
 
     def _run(self, host, username, password, port, key_filename,
               key_passphrase, enable_password, poll_interval, command):
-        session = CiscoSSHSession(
-            host=host, username=username, password=password, port=port,
-            key_filename=key_filename, key_passphrase=key_passphrase,
-            enable_password=enable_password,
-        )
-        try:
-            session.connect()
-        except CiscoSSHError as exc:
-            self.status = "error"
-            self.error = str(exc)
-            return
+        """Connect-and-poll loop, with automatic reconnection.
 
-        with self._lock:
-            self._session = session
-        self.status = "running"
-
+        Runs as two nested loops: the outer one (re)connects, the inner
+        one polls on that connection. If the SSH transport dies between
+        polls - e.g. the router reboots - the inner loop notices (via
+        session.is_connected()) and breaks out to the outer loop, which
+        opens a fresh session and resumes. Without this, a single dropped
+        connection left the monitor stuck in "error" forever: it used to
+        only ever connect once, then kept calling _poll_once() against
+        the same dead session every cycle.
+        """
         while not self._stop_event.is_set():
-            self._poll_once(command)
-            self._poll_log()
-            self._stop_event.wait(poll_interval)
+            session = CiscoSSHSession(
+                host=host, username=username, password=password, port=port,
+                key_filename=key_filename, key_passphrase=key_passphrase,
+                enable_password=enable_password,
+            )
+            try:
+                session.connect()
+            except CiscoSSHError as exc:
+                self.status = "error"
+                self.error = str(exc)
+                with self._lock:
+                    self._session = None
+                # back off before retrying - e.g. a router reboot takes a
+                # couple of minutes, no point hammering it every second
+                self._stop_event.wait(poll_interval)
+                continue
+
+            with self._lock:
+                self._session = session
+            self.status = "running"
+            self._last_log_raw = ""  # fresh baseline for the new session
+
+            while not self._stop_event.is_set():
+                self._poll_once(command)
+                self._poll_log()
+                with self._lock:
+                    alive = self._session is not None and self._session.is_connected()
+                if not alive:
+                    break  # connection dropped (e.g. router reboot) - reconnect
+                self._stop_event.wait(poll_interval)
+
+            with self._lock:
+                if self._session:
+                    self._session.close()
+                self._session = None
+            if not self._stop_event.is_set():
+                self.status = "connecting"
 
     def _poll_once(self, command):
         with self._lock:
